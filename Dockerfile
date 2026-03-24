@@ -19,7 +19,11 @@ RUN npm prune --omit=dev
 FROM node:20-alpine
 
 # jq is used by run.sh to parse /data/options.json
-RUN apk add --no-cache jq
+# python3 + ffmpeg are required by yt-dlp for Instagram fetching
+RUN apk add --no-cache jq python3 ffmpeg \
+    && wget -q https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+         -O /usr/local/bin/yt-dlp \
+    && chmod a+x /usr/local/bin/yt-dlp
 
 WORKDIR /app
 
