@@ -30,7 +30,9 @@ export DB_PATH=/data/recipes.db
 
 COOKIES_FILE=$(jq --raw-output '.cookies_file // empty' "$OPTIONS_FILE")
 if [ -n "$COOKIES_FILE" ]; then
-  export YTDLP_COOKIES_FILE="$COOKIES_FILE"
+  # Copy to /data/ so yt-dlp can write updated cookies (source may be read-only)
+  cp "$COOKIES_FILE" /data/cookies.txt
+  export YTDLP_COOKIES_FILE="/data/cookies.txt"
 fi
 
 echo "[run.sh] Starting Recipe Organizer v$(grep '^version' /data/options.json 2>/dev/null || true)..."
