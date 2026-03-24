@@ -74,6 +74,18 @@ async function fetchViaYtDlp(url: string): Promise<InstagramPost> {
       throw new InstagramError('Rate limited by Instagram', 'RATE_LIMITED', err);
     }
 
+    if (stderrLower.includes('no such file or directory') && stderrLower.includes('cookies')) {
+      throw new InstagramError('Cookies file not found — check the cookies_file path in add-on config', 'FETCH_FAILED', err);
+    }
+
+    if (
+      stderrLower.includes('empty media response') ||
+      stderrLower.includes('login') ||
+      stderrLower.includes('cookies are required')
+    ) {
+      throw new InstagramError('Instagram requires login — provide a cookies file', 'PRIVATE_POST', err);
+    }
+
     // Generic failure — caller will try HTTP fallback
     console.warn('[instagram] yt-dlp stderr:', stderr || '(no stderr)');
     throw new InstagramError('yt-dlp fetch failed', 'FETCH_FAILED', err);
@@ -152,12 +164,19 @@ export async function fetchInstagramPost(url: string): Promise<InstagramPost> {
 // Called at startup — warns if yt-dlp is missing but doesn't crash the bot
 export async function verifyYtDlp(): Promise<void> {
   try {
-    await execa(config.ytDlp.binaryPath, ['--version'], { timeout: 5000 });
-    console.log(`[instagram] yt-dlp verified at: ${config.ytDlp.binaryPath}`);
+    const result = await execa(config.ytDlp.binaryPath, ['--version'], {
+      timeout: 10000,
+      reject: false, // don't throw on non-zero exit
+    });
+    const version = result.stdout.trim() || result.stderr.trim();
+    if (version) {
+      console.log(`[instagram] yt-dlp verified: ${version}`);
+    } else {
+      console.warn(`[instagram] WARNING: yt-dlp found but returned no version output.`);
+    }
   } catch {
     console.warn(
-      `[instagram] WARNING: yt-dlp not found at "${config.ytDlp.binaryPath}". ` +
-        'Set YTDLP_PATH in .env or check docs/setup-ytdlp.md. HTTP fallback will be used.',
+      `[instagram] WARNING: yt-dlp not found at "${config.ytDlp.binaryPath}". HTTP fallback will be used.`,
     );
   }
 }
