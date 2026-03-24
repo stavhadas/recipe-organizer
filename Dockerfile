@@ -29,7 +29,8 @@ COPY --from=builder /app/public       ./public
 COPY --from=builder /app/package.json ./package.json
 
 COPY addon/run.sh /run.sh
-RUN chmod a+x /run.sh
+# Strip Windows CRLF line endings and make executable
+RUN sed -i 's/\r$//' /run.sh && chmod a+x /run.sh
 
 EXPOSE 3000
 

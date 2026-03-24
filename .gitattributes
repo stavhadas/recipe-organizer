@@ -1,0 +1,5 @@
+# Ensure shell scripts always use LF on all platforms
+*.sh text eol=lf
+
+# Default: auto-detect
+* text=auto
