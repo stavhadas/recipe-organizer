@@ -1,6 +1,6 @@
 name: "Recipe Organizer"
 description: "Telegram bot that extracts recipes from Instagram posts and serves a Recipe Vault web UI"
-version: "1.0.2"
+version: "1.0.3"
 slug: "recipe-organizer"
 url: "https://github.com/stavhadas/recipe-organizer"
 init: false
