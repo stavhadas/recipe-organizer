@@ -14,6 +14,11 @@
     .spinner { animation: spin 0.8s linear infinite; }
     [dir="rtl"] .ingredient-bullet { order: 1; }
     [dir="rtl"] .ingredient-text  { order: 0; }
+
+    /* Cooking mode */
+    #cooking { transition: opacity 0.2s ease; }
+    .cook-slide { animation: slideIn 0.25s ease; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
   </style>
 </head>
 <body class="bg-stone-50 min-h-screen">
@@ -48,10 +53,15 @@
   <!-- Recipe content -->
   <main id="content" class="hidden max-w-3xl mx-auto px-4 py-10">
 
-    <div class="mb-8">
+    <div class="mb-6">
       <h1 id="title" dir="auto" class="text-3xl font-bold text-stone-800 leading-tight mb-3"></h1>
       <div id="description" dir="auto" class="hidden text-stone-500 text-base italic mb-4"></div>
-      <div id="meta" class="flex flex-wrap gap-2"></div>
+      <div id="meta" class="flex flex-wrap gap-2 mb-5"></div>
+      <!-- Start Making button -->
+      <button onclick="openCooking()" class="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+        <span class="text-base">🍳</span>
+        <span id="start-btn-label">Start Making</span>
+      </button>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-5 gap-8">
@@ -85,12 +95,56 @@
     </div>
   </main>
 
+  <!-- ── Cooking Mode Overlay ────────────────────────────────────────────── -->
+  <div id="cooking" class="hidden fixed inset-0 z-50 bg-stone-900 flex flex-col select-none"
+       style="touch-action: pan-y;">
+
+    <!-- Progress bar -->
+    <div class="flex gap-1 px-4 pt-4 pb-2 shrink-0" id="cook-progress"></div>
+
+    <!-- Top bar — z-10 so it sits above the tap zones -->
+    <div class="relative z-10 flex items-center justify-between px-4 pb-3 shrink-0">
+      <span id="cook-step-label" class="text-stone-400 text-sm font-medium"></span>
+      <button onclick="closeCooking()" class="w-8 h-8 flex items-center justify-center rounded-full bg-stone-800 hover:bg-stone-700 text-stone-300 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Slide content -->
+    <div id="cook-slide" class="flex-1 flex flex-col justify-between px-6 pb-8 overflow-y-auto">
+
+      <!-- Step content -->
+      <div class="flex-1 flex flex-col justify-center py-6">
+        <!-- Prep card header / step number -->
+        <div id="cook-step-num" class="text-amber-400 text-5xl font-bold mb-6 text-center tabular-nums"></div>
+        <!-- Instruction -->
+        <p id="cook-instruction" dir="auto" class="text-white text-xl leading-relaxed text-center font-medium"></p>
+        <!-- Duration -->
+        <p id="cook-duration" class="hidden text-stone-400 text-sm text-center mt-3"></p>
+      </div>
+
+      <!-- Ingredient card -->
+      <div id="cook-ingredients" class="hidden bg-stone-800 rounded-2xl p-4">
+        <p class="text-amber-400 text-xs font-semibold uppercase tracking-wider mb-3" id="cook-ing-label">For this step</p>
+        <ul id="cook-ing-list" class="space-y-2"></ul>
+      </div>
+    </div>
+
+    <!-- Tap zones (invisible, full height sides) -->
+    <div class="absolute inset-y-0 left-0 w-1/3" onclick="cookNav(-1)"></div>
+    <div class="absolute inset-y-0 right-0 w-1/3" onclick="cookNav(1)"></div>
+  </div>
+
 <script>
-  // Fix back link to use BASE path
   document.getElementById('back-link').href = BASE + '/';
   document.getElementById('nf-back').href = BASE + '/';
 
   const id = window.location.pathname.split('/').pop();
+  let recipe = null;
+  let cookIndex = 0; // 0 = prep card, 1..n = steps
+  let isRtlRecipe = false;
 
   function isRtl(str) {
     return /^[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/.test((str ?? '').trimStart());
@@ -105,34 +159,39 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // ── Recipe load ─────────────────────────────────────────────────────────────
+
   async function load() {
     const res = await fetch(`${BASE}/api/recipes/${id}`);
     document.getElementById('loading').classList.add('hidden');
 
     if (!res.ok) {
       const nf = document.getElementById('not-found');
-      nf.classList.remove('hidden');
-      nf.classList.add('flex');
-      return;
+      nf.classList.remove('hidden'); nf.classList.add('flex'); return;
     }
 
-    const r = await res.json();
-    document.title = r.title + ' — Recipe Vault';
+    recipe = await res.json();
+    document.title = recipe.title + ' — Recipe Vault';
 
-    const rtl = isRtl(r.title);
-    if (rtl) document.documentElement.setAttribute('dir', 'rtl');
+    isRtlRecipe = isRtl(recipe.title);
+    if (isRtlRecipe) document.documentElement.setAttribute('dir', 'rtl');
 
-    document.getElementById('title').textContent = r.title;
+    document.getElementById('title').textContent = recipe.title;
 
     const desc = document.getElementById('description');
-    if (r.description) { desc.textContent = r.description; desc.classList.remove('hidden'); }
+    if (recipe.description) { desc.textContent = recipe.description; desc.classList.remove('hidden'); }
 
     const meta = document.getElementById('meta');
-    if (r.servings) meta.innerHTML += metaChip(r.servings, '🍽 ');
-    if (r.prepTime)  meta.innerHTML += metaChip((rtl ? 'הכנה ' : 'Prep ') + r.prepTime, '⏱ ');
-    if (r.cookTime)  meta.innerHTML += metaChip((rtl ? 'בישול ' : 'Cook ') + r.cookTime, '🔥 ');
+    if (recipe.servings) meta.innerHTML += metaChip(recipe.servings, '🍽 ');
+    if (recipe.prepTime)  meta.innerHTML += metaChip((isRtlRecipe ? 'הכנה ' : 'Prep ') + recipe.prepTime, '⏱ ');
+    if (recipe.cookTime)  meta.innerHTML += metaChip((isRtlRecipe ? 'בישול ' : 'Cook ') + recipe.cookTime, '🔥 ');
 
-    document.getElementById('ingredients').innerHTML = r.ingredients.map(ing => {
+    if (isRtlRecipe) {
+      document.getElementById('start-btn-label').textContent = 'התחל בישול';
+      document.getElementById('cook-ing-label').textContent = 'לשלב הזה';
+    }
+
+    document.getElementById('ingredients').innerHTML = recipe.ingredients.map(ing => {
       const parts = [ing.amount, ing.unit, ing.name].filter(Boolean).join(' ');
       const notes = ing.notes ? `<span class="block text-xs text-stone-400" dir="auto">${escHtml(ing.notes)}</span>` : '';
       return `<li class="flex items-start gap-2.5 text-sm text-stone-700">
@@ -141,7 +200,7 @@
       </li>`;
     }).join('');
 
-    document.getElementById('steps').innerHTML = r.steps.map(s => {
+    document.getElementById('steps').innerHTML = recipe.steps.map(s => {
       const dur = s.duration ? `<span class="text-xs text-stone-400 mt-0.5 block" dir="auto">${escHtml(s.duration)}</span>` : '';
       return `<li class="flex gap-3 text-sm text-stone-700">
         <span class="shrink-0 w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xs">${s.step}</span>
@@ -149,10 +208,128 @@
       </li>`;
     }).join('');
 
-    document.getElementById('source').href = r.sourceUrl;
+    document.getElementById('source').href = recipe.sourceUrl;
     document.getElementById('content').classList.remove('hidden');
     document.getElementById('content').classList.add('block');
   }
+
+  // ── Cooking mode ─────────────────────────────────────────────────────────────
+
+  // Total slides = 1 (prep) + steps.length
+  function totalSlides() { return 1 + recipe.steps.length; }
+
+  function openCooking() {
+    cookIndex = 0;
+    renderCookSlide();
+    document.getElementById('cooking').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeCooking() {
+    document.getElementById('cooking').classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  function cookNav(dir) {
+    const next = cookIndex + (isRtlRecipe ? -dir : dir);
+    if (next < 0) return;
+    if (next >= totalSlides()) { closeCooking(); return; } // past last step → close
+    cookIndex = next;
+    renderCookSlide();
+  }
+
+  function renderCookSlide() {
+    const total = totalSlides();
+    const stepCount = recipe.steps.length;
+
+    // Progress bar
+    document.getElementById('cook-progress').innerHTML = Array.from({ length: total }, (_, i) =>
+      `<div class="flex-1 h-1 rounded-full ${i <= cookIndex ? 'bg-amber-400' : 'bg-stone-700'} transition-colors"></div>`
+    ).join('');
+
+    // Step label
+    document.getElementById('cook-step-label').textContent =
+      cookIndex === 0
+        ? (isRtlRecipe ? 'רשימת מצרכים' : 'Ingredients')
+        : `${isRtlRecipe ? 'שלב' : 'Step'} ${cookIndex} / ${stepCount}`;
+
+    // Animate slide
+    const slide = document.getElementById('cook-slide');
+    slide.classList.remove('cook-slide');
+    void slide.offsetWidth; // force reflow
+    slide.classList.add('cook-slide');
+
+    if (cookIndex === 0) {
+      // Prep card — all ingredients
+      document.getElementById('cook-step-num').textContent = '📋';
+      document.getElementById('cook-instruction').textContent =
+        isRtlRecipe ? 'הכינו את המצרכים הבאים:' : 'Gather your ingredients:';
+      document.getElementById('cook-duration').classList.add('hidden');
+
+      const ingCard = document.getElementById('cook-ingredients');
+      ingCard.classList.remove('hidden');
+      document.getElementById('cook-ing-list').innerHTML = recipe.ingredients.map(ing => {
+        const parts = [ing.amount, ing.unit, ing.name].filter(Boolean).join(' ');
+        return `<li class="flex items-start gap-2 text-sm text-stone-200">
+          <span class="mt-2 w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>
+          <span dir="auto">${escHtml(parts)}</span>
+        </li>`;
+      }).join('');
+    } else {
+      // Step card
+      const step = recipe.steps[cookIndex - 1];
+      document.getElementById('cook-step-num').textContent = String(step.step);
+      document.getElementById('cook-instruction').textContent = step.instruction;
+
+      const durEl = document.getElementById('cook-duration');
+      if (step.duration) { durEl.textContent = '⏱ ' + step.duration; durEl.classList.remove('hidden'); }
+      else { durEl.classList.add('hidden'); }
+
+      // Per-step ingredients: prefer Gemini-extracted objects, fall back to
+      // name-matching against the step instruction for older recipes.
+      let stepIngs = step.ingredients ?? [];
+      if (stepIngs.length === 0) {
+        const text = step.instruction.toLowerCase();
+        stepIngs = recipe.ingredients
+          .filter(ing => text.includes(ing.name.toLowerCase()))
+          .map(ing => ({ name: ing.name, amount: ing.amount ?? null, unit: ing.unit ?? null }));
+      }
+
+      const ingCard = document.getElementById('cook-ingredients');
+      if (stepIngs.length > 0) {
+        ingCard.classList.remove('hidden');
+        document.getElementById('cook-ing-list').innerHTML = stepIngs.map(ing => {
+          const parts = [ing.amount, ing.unit, ing.name].filter(Boolean).join(' ');
+          return `<li class="flex items-start gap-2 text-sm text-stone-200">
+            <span class="mt-2 w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>
+            <span dir="auto">${escHtml(parts)}</span>
+          </li>`;
+        }).join('');
+      } else {
+        ingCard.classList.add('hidden');
+      }
+    }
+
+  }
+
+  // Keyboard navigation
+  document.addEventListener('keydown', e => {
+    if (document.getElementById('cooking').classList.contains('hidden')) return;
+    if (e.key === 'ArrowRight') cookNav(isRtlRecipe ? -1 : 1);
+    if (e.key === 'ArrowLeft')  cookNav(isRtlRecipe ? 1 : -1);
+    if (e.key === 'Escape') closeCooking();
+  });
+
+  // Swipe support
+  let touchStartX = 0;
+  const cookEl = document.getElementById('cooking');
+  cookEl.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+  cookEl.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) cookNav(dx < 0 ? 1 : -1);
+  });
+
+  // ── Misc ────────────────────────────────────────────────────────────────────
 
   function copyLink() {
     navigator.clipboard.writeText(window.location.href).then(() => {

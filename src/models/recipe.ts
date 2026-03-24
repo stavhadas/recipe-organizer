@@ -8,10 +8,18 @@ export const IngredientSchema = z.object({
   notes: z.string().nullish(),
 });
 
+// Per-step ingredient: name + the specific amount used in that step
+export const StepIngredientSchema = z.object({
+  name: z.string().min(1),
+  amount: z.string().nullish(),
+  unit: z.string().nullish(),
+});
+
 export const RecipeStepSchema = z.object({
   step: z.number().int().positive(),
   instruction: z.string().min(1),
   duration: z.string().nullish(),
+  ingredients: z.array(StepIngredientSchema).nullish(), // ingredients added in this step with amounts
 });
 
 export const RecipeSchema = z.object({
@@ -35,6 +43,7 @@ export const GeminiRecipeOutputSchema = RecipeSchema.omit({
 });
 
 export type Ingredient = z.infer<typeof IngredientSchema>;
+export type StepIngredient = z.infer<typeof StepIngredientSchema>;
 export type RecipeStep = z.infer<typeof RecipeStepSchema>;
 export type Recipe = z.infer<typeof RecipeSchema>;
 export type GeminiRecipeOutput = z.infer<typeof GeminiRecipeOutputSchema>;

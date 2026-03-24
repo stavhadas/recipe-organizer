@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { config } from '../config/index.js';
-import { RecipeSchema, type Recipe } from '../models/recipe.js';
+import { RecipeSchema, type Recipe, type RecipeStep } from '../models/recipe.js';
 
 const db = new Database(config.web.dbPath);
 
@@ -93,4 +93,17 @@ export function getRecipeById(id: number): (Recipe & { id: number }) | undefined
 export function searchRecipes(query: string): (Recipe & { id: number })[] {
   const like = `%${query}%`;
   return (stmtSearch.all(like, like) as RecipeRow[]).map(rowToRecipe);
+}
+
+const stmtUpdateSteps = db.prepare(`UPDATE recipes SET steps = ? WHERE id = ?`);
+
+export function updateRecipeSteps(id: number, steps: RecipeStep[]): void {
+  stmtUpdateSteps.run(JSON.stringify(steps), id);
+}
+
+// Returns all recipes that have a raw caption but no per-step ingredient data
+export function getRecipesNeedingStepIngredients(): (Recipe & { id: number })[] {
+  return getAllRecipes().filter(
+    (r) => r._raw && r.steps.every((s) => !s.ingredients || s.ingredients.length === 0),
+  );
 }

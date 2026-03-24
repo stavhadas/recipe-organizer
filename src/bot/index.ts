@@ -4,12 +4,19 @@ import { config } from '../config/index.js';
 import { verifyYtDlp } from '../services/instagram.js';
 import { handleTextMessage } from './handlers.js';
 import { startWebServer } from '../web/server.js';
+import { backfillStepIngredients } from '../services/migration.js';
 
 async function main(): Promise<void> {
   // Check yt-dlp at startup (non-fatal — HTTP fallback is available)
   await verifyYtDlp();
 
   startWebServer();
+
+  // Backfill per-step ingredients for recipes fetched before that feature existed.
+  // Runs in the background — does not block bot startup.
+  backfillStepIngredients().catch((err) =>
+    console.error('[migration] backfillStepIngredients failed:', err),
+  );
 
   const bot = new Telegraf(config.telegram.botToken);
 

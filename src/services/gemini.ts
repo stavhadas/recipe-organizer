@@ -13,6 +13,7 @@ Rules:
 - Omit amounts and units only when truly absent — do not guess specific measurements, but do include vague ones like "a handful", "to taste", "a drizzle".
 - Clean up hashtags (#...), mentions (@...), and promotional text.
 - Steps must be numbered sequentially starting from 1.
+- For each step, include an "ingredients" array listing the ingredients added or used in that step. Each entry has "name" (exact name from the ingredients list above) and, if determinable, "amount" and "unit" for the quantity used specifically in that step — which may differ from the total amount in the ingredients list. Use your language understanding to infer what's being added at each step. Omit the field entirely if no specific ingredient is added in that step.
 - If the post genuinely contains no food recipe at all, return exactly: {"error": "No recipe found", "reason": "<brief explanation>"}.
 - Do NOT include any text outside the JSON object.`;
 
@@ -34,7 +35,14 @@ const RECIPE_JSON_SCHEMA = `{
     {
       "step": "number",
       "instruction": "string",
-      "duration": "string — optional, e.g. '5 minutes'"
+      "duration": "string — optional, e.g. '5 minutes'",
+      "ingredients": [
+        {
+          "name": "string — exact ingredient name from the ingredients list",
+          "amount": "string — optional, quantity used in THIS step specifically",
+          "unit": "string — optional"
+        }
+      ]
     }
   ]
 }`;
