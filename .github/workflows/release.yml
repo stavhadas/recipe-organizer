@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 # Skip if the commit was made by this workflow (version bump commit)
 # GitHub won't trigger a new run when the commit message contains [skip ci]
@@ -81,7 +81,7 @@ jobs:
           git add package.json package-lock.json addon/config.yaml
           git commit -m "chore: release v${VERSION} [skip ci]"
           git tag "v${VERSION}"
-          git push
+          git push origin master
           git push --tags
 
       - name: Create GitHub Release
