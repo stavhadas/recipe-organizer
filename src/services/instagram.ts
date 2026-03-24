@@ -75,6 +75,7 @@ async function fetchViaYtDlp(url: string): Promise<InstagramPost> {
     }
 
     // Generic failure — caller will try HTTP fallback
+    console.warn('[instagram] yt-dlp stderr:', stderr || '(no stderr)');
     throw new InstagramError('yt-dlp fetch failed', 'FETCH_FAILED', err);
   }
 

@@ -1,6 +1,6 @@
 name: "Recipe Organizer"
 description: "Telegram bot that extracts recipes from Instagram posts and serves a Recipe Vault web UI"
-version: "1.0.4"
+version: "1.0.5"
 slug: "recipe-organizer"
 url: "https://github.com/stavhadas/recipe-organizer"
 init: false
@@ -33,8 +33,10 @@ options:
   telegram_bot_token: ""
   gemini_api_key: ""
   gemini_model: "gemini-2.5-flash"
+  cookies_file: ""
 
 schema:
   telegram_bot_token: str
   gemini_api_key: str
   gemini_model: str
+  cookies_file: str?

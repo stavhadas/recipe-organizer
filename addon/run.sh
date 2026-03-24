@@ -28,5 +28,10 @@ export GEMINI_MODEL
 export WEB_PORT=3000
 export DB_PATH=/data/recipes.db
 
+COOKIES_FILE=$(jq --raw-output '.cookies_file // empty' "$OPTIONS_FILE")
+if [ -n "$COOKIES_FILE" ]; then
+  export YTDLP_COOKIES_FILE="$COOKIES_FILE"
+fi
+
 echo "[run.sh] Starting Recipe Organizer v$(grep '^version' /data/options.json 2>/dev/null || true)..."
 exec node /app/dist/bot/index.js
