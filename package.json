@@ -1,6 +1,6 @@
 {
   "name": "recipe-organizer-bot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Telegram bot that extracts recipes from Instagram posts",
   "type": "module",
   "scripts": {
