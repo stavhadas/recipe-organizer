@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+cookies.txt
+recipes.db
+recipes.db-journal
+recipes.db-wal
+recipes.db-shm
+.claude/

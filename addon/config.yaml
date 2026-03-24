@@ -1,0 +1,40 @@
+name: "Recipe Organizer"
+description: "Telegram bot that extracts recipes from Instagram posts and serves a Recipe Vault web UI"
+version: "1.0.0"
+slug: "recipe-organizer"
+url: "https://github.com/stavhadas/recipe-organizer"
+init: false
+
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+
+image: "ghcr.io/stavhadas/recipe-organizer"
+
+# Persistent storage for recipes.db
+map:
+  - data:rw
+
+# HA Ingress — embeds the Recipe Vault in the HA sidebar
+ingress: true
+ingress_port: 3000
+panel_icon: "mdi:chef-hat"
+panel_title: "Recipe Vault"
+
+# Also expose the port directly for external access
+ports:
+  3000/tcp: 3000
+ports_description:
+  3000/tcp: "Recipe Vault Web UI"
+
+options:
+  telegram_bot_token: ""
+  gemini_api_key: ""
+  gemini_model: "gemini-2.5-flash"
+
+schema:
+  telegram_bot_token: str
+  gemini_api_key: str
+  gemini_model: str

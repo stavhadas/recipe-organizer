@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recipe Vault</title>
+  <script>const BASE = '__BASE_PATH__';</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 12px 28px rgba(0,0,0,0.10); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; }
+  </style>
+</head>
+<body class="bg-stone-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-stone-200 sticky top-0 z-10">
+    <div class="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center gap-4">
+      <div class="flex items-center gap-2 shrink-0">
+        <span class="text-2xl">🍳</span>
+        <h1 class="text-xl font-bold text-stone-800">Recipe Vault</h1>
+      </div>
+      <div class="relative w-full sm:max-w-md">
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+        </svg>
+        <input
+          id="search"
+          type="text"
+          placeholder="Search recipes..."
+          class="w-full pl-9 pr-4 py-2 rounded-lg border border-stone-200 bg-stone-50 text-sm text-stone-800 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+        />
+      </div>
+      <span id="count" class="text-sm text-stone-400 shrink-0"></span>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <main class="max-w-6xl mx-auto px-4 py-8">
+    <div id="loading" class="flex justify-center py-24">
+      <svg class="spinner w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+    </div>
+
+    <div id="empty" class="hidden flex-col items-center justify-center py-24 text-center">
+      <span class="text-6xl mb-4">🥘</span>
+      <p class="text-lg font-semibold text-stone-600" id="empty-title">No recipes yet</p>
+      <p class="text-sm text-stone-400 mt-1" id="empty-sub">Send an Instagram recipe link to your Telegram bot to get started.</p>
+    </div>
+
+    <div id="grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"></div>
+  </main>
+
+<script>
+  const gridEl = document.getElementById('grid');
+  const loadingEl = document.getElementById('loading');
+  const emptyEl = document.getElementById('empty');
+  const emptyTitle = document.getElementById('empty-title');
+  const emptySub = document.getElementById('empty-sub');
+  const countEl = document.getElementById('count');
+
+  function metaChip(text, icon = '') {
+    return `<span class="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">${icon}${text}</span>`;
+  }
+
+  function renderCards(recipes) {
+    loadingEl.classList.add('hidden');
+
+    if (recipes.length === 0) {
+      gridEl.classList.add('hidden');
+      emptyEl.classList.remove('hidden');
+      emptyEl.classList.add('flex');
+      countEl.textContent = '';
+      return;
+    }
+
+    emptyEl.classList.add('hidden');
+    emptyEl.classList.remove('flex');
+    gridEl.classList.remove('hidden');
+    countEl.textContent = `${recipes.length} recipe${recipes.length !== 1 ? 's' : ''}`;
+
+    gridEl.innerHTML = recipes.map(r => {
+      const chips = [];
+      if (r.servings) chips.push(metaChip(r.servings, '🍽 '));
+      if (r.prepTime) chips.push(metaChip('Prep ' + r.prepTime, '⏱ '));
+      if (r.cookTime) chips.push(metaChip('Cook ' + r.cookTime, '🔥 '));
+
+      return `
+        <a href="${BASE}/recipes/${r.id}" class="card bg-white rounded-xl border border-stone-100 shadow-sm overflow-hidden flex flex-col no-underline">
+          <div class="p-5 flex flex-col flex-1">
+            <h2 dir="auto" class="font-semibold text-stone-800 text-base leading-snug mb-1">${escHtml(r.title)}</h2>
+            ${r.description ? `<p dir="auto" class="text-sm text-stone-500 line-clamp-2 mb-3">${escHtml(r.description)}</p>` : '<div class="mb-3"></div>'}
+            <div class="flex flex-wrap gap-1.5 mb-4 min-h-[1.5rem]">${chips.join('')}</div>
+            <div class="mt-auto flex items-center justify-between">
+              <span class="text-xs text-stone-400">${r.ingredients.length} ingredients</span>
+              <span class="text-xs font-semibold text-amber-600">View recipe →</span>
+            </div>
+          </div>
+        </a>`;
+    }).join('');
+  }
+
+  let debounceTimer;
+  document.getElementById('search').addEventListener('input', e => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => loadRecipes(e.target.value.trim()), 300);
+  });
+
+  async function loadRecipes(query = '') {
+    const url = query ? `${BASE}/api/recipes?q=${encodeURIComponent(query)}` : `${BASE}/api/recipes`;
+    try {
+      const recipes = await fetch(url).then(r => r.json());
+      if (query && recipes.length === 0) {
+        emptyTitle.textContent = `No results for "${query}"`;
+        emptySub.textContent = 'Try a different search term.';
+      } else {
+        emptyTitle.textContent = 'No recipes yet';
+        emptySub.textContent = 'Send an Instagram recipe link to your Telegram bot to get started.';
+      }
+      renderCards(recipes);
+    } catch {
+      loadingEl.classList.add('hidden');
+      gridEl.innerHTML = '<p class="text-stone-400 text-sm col-span-3 text-center py-12">Failed to load recipes.</p>';
+      gridEl.classList.remove('hidden');
+    }
+  }
+
+  function escHtml(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  loadRecipes();
+</script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Skip if the commit was made by this workflow (version bump commit)
+# GitHub won't trigger a new run when the commit message contains [skip ci]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Extra guard: don't run on the version-bump commit itself
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # ── Version bump ────────────────────────────────────────────────────────
+      - name: Bump patch version
+        id: version
+        run: |
+          NEW_VERSION=$(npm version patch --no-git-tag-version | sed 's/v//')
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync version to addon/config.yaml
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          sed -i "s/^version: .*/version: \"$VERSION\"/" addon/config.yaml
+
+      # ── Docker build & push ─────────────────────────────────────────────────
+      - name: Set up QEMU (multi-arch emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: |
+            ghcr.io/stavhadas/recipe-organizer:${{ steps.version.outputs.version }}
+            ghcr.io/stavhadas/recipe-organizer:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Commit version bump + tag + release ─────────────────────────────────
+      - name: Commit, tag, and push
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json addon/config.yaml
+          git commit -m "chore: release v${VERSION} [skip ci]"
+          git tag "v${VERSION}"
+          git push
+          git push --tags
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes "Docker image: \`ghcr.io/stavhadas/recipe-organizer:${VERSION}\`" \
+            --latest

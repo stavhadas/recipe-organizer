@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recipe</title>
+  <script>const BASE = '__BASE_PATH__';</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; }
+    [dir="rtl"] .ingredient-bullet { order: 1; }
+    [dir="rtl"] .ingredient-text  { order: 0; }
+  </style>
+</head>
+<body class="bg-stone-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-stone-200">
+    <div class="max-w-3xl mx-auto px-4 py-4 flex items-center gap-3">
+      <a id="back-link" href="/" class="flex items-center gap-2 text-stone-500 hover:text-stone-800 transition-colors text-sm font-medium">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Recipe Vault
+      </a>
+    </div>
+  </header>
+
+  <!-- Loading -->
+  <div id="loading" class="flex justify-center py-24">
+    <svg class="spinner w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+    </svg>
+  </div>
+
+  <!-- Not found -->
+  <div id="not-found" class="hidden flex-col items-center justify-center py-24 text-center">
+    <span class="text-6xl mb-4">🔍</span>
+    <p class="text-lg font-semibold text-stone-600">Recipe not found</p>
+    <a id="nf-back" href="/" class="mt-4 text-sm text-amber-600 hover:underline">Back to vault</a>
+  </div>
+
+  <!-- Recipe content -->
+  <main id="content" class="hidden max-w-3xl mx-auto px-4 py-10">
+
+    <div class="mb-8">
+      <h1 id="title" dir="auto" class="text-3xl font-bold text-stone-800 leading-tight mb-3"></h1>
+      <div id="description" dir="auto" class="hidden text-stone-500 text-base italic mb-4"></div>
+      <div id="meta" class="flex flex-wrap gap-2"></div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-8">
+      <div class="md:col-span-2">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-4">Ingredients</h2>
+        <ul id="ingredients" class="space-y-2"></ul>
+      </div>
+      <div class="hidden md:block md:col-span-1">
+        <div class="w-px bg-stone-200 mx-auto h-full"></div>
+      </div>
+      <div class="md:col-span-2">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-4">Instructions</h2>
+        <ol id="steps" class="space-y-4"></ol>
+      </div>
+    </div>
+
+    <div class="mt-10 pt-6 border-t border-stone-200 flex items-center justify-between flex-wrap gap-4">
+      <a id="source" href="#" target="_blank" rel="noopener noreferrer"
+        class="inline-flex items-center gap-1.5 text-sm text-amber-600 hover:text-amber-700 font-medium">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+        </svg>
+        View original post
+      </a>
+      <button onclick="copyLink()" class="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-700 font-medium transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-4 10h6a2 2 0 002-2v-8a2 2 0 00-2-2h-6a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+        </svg>
+        <span id="copy-label">Copy link</span>
+      </button>
+    </div>
+  </main>
+
+<script>
+  // Fix back link to use BASE path
+  document.getElementById('back-link').href = BASE + '/';
+  document.getElementById('nf-back').href = BASE + '/';
+
+  const id = window.location.pathname.split('/').pop();
+
+  function isRtl(str) {
+    return /^[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/.test((str ?? '').trimStart());
+  }
+
+  function metaChip(text, icon = '') {
+    return `<span class="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full font-medium">${icon}${text}</span>`;
+  }
+
+  function escHtml(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  async function load() {
+    const res = await fetch(`${BASE}/api/recipes/${id}`);
+    document.getElementById('loading').classList.add('hidden');
+
+    if (!res.ok) {
+      const nf = document.getElementById('not-found');
+      nf.classList.remove('hidden');
+      nf.classList.add('flex');
+      return;
+    }
+
+    const r = await res.json();
+    document.title = r.title + ' — Recipe Vault';
+
+    const rtl = isRtl(r.title);
+    if (rtl) document.documentElement.setAttribute('dir', 'rtl');
+
+    document.getElementById('title').textContent = r.title;
+
+    const desc = document.getElementById('description');
+    if (r.description) { desc.textContent = r.description; desc.classList.remove('hidden'); }
+
+    const meta = document.getElementById('meta');
+    if (r.servings) meta.innerHTML += metaChip(r.servings, '🍽 ');
+    if (r.prepTime)  meta.innerHTML += metaChip((rtl ? 'הכנה ' : 'Prep ') + r.prepTime, '⏱ ');
+    if (r.cookTime)  meta.innerHTML += metaChip((rtl ? 'בישול ' : 'Cook ') + r.cookTime, '🔥 ');
+
+    document.getElementById('ingredients').innerHTML = r.ingredients.map(ing => {
+      const parts = [ing.amount, ing.unit, ing.name].filter(Boolean).join(' ');
+      const notes = ing.notes ? `<span class="block text-xs text-stone-400" dir="auto">${escHtml(ing.notes)}</span>` : '';
+      return `<li class="flex items-start gap-2.5 text-sm text-stone-700">
+        <span class="ingredient-bullet mt-2 w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>
+        <span class="ingredient-text" dir="auto">${escHtml(parts)}${notes}</span>
+      </li>`;
+    }).join('');
+
+    document.getElementById('steps').innerHTML = r.steps.map(s => {
+      const dur = s.duration ? `<span class="text-xs text-stone-400 mt-0.5 block" dir="auto">${escHtml(s.duration)}</span>` : '';
+      return `<li class="flex gap-3 text-sm text-stone-700">
+        <span class="shrink-0 w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xs">${s.step}</span>
+        <span class="pt-1" dir="auto">${escHtml(s.instruction)}${dur}</span>
+      </li>`;
+    }).join('');
+
+    document.getElementById('source').href = r.sourceUrl;
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('content').classList.add('block');
+  }
+
+  function copyLink() {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      const label = document.getElementById('copy-label');
+      label.textContent = 'Copied!';
+      setTimeout(() => { label.textContent = 'Copy link'; }, 2000);
+    });
+  }
+
+  load();
+</script>
+</body>
+</html>
