@@ -15,6 +15,9 @@
     .card:hover { transform: translateY(-4px); box-shadow: 0 12px 28px rgba(0,0,0,0.10); }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { animation: spin 0.8s linear infinite; }
+    /* hide scrollbar on label bar */
+    #label-bar { scrollbar-width: none; }
+    #label-bar::-webkit-scrollbar { display: none; }
   </style>
 </head>
 <body class="bg-stone-50 min-h-screen">
@@ -38,6 +41,13 @@
         />
       </div>
       <span id="count" class="text-sm text-stone-400 shrink-0"></span>
+    </div>
+
+    <!-- Label filter bar -->
+    <div id="label-bar-wrap" class="hidden border-t border-stone-100">
+      <div id="label-bar" class="max-w-6xl mx-auto px-4 py-2 flex gap-2 overflow-x-auto">
+        <!-- chips injected by JS -->
+      </div>
     </div>
   </header>
 
@@ -66,10 +76,66 @@
   const emptyTitle = document.getElementById('empty-title');
   const emptySub = document.getElementById('empty-sub');
   const countEl = document.getElementById('count');
+  const labelBarWrap = document.getElementById('label-bar-wrap');
+  const labelBar = document.getElementById('label-bar');
+
+  let activeLabels = new Set();
+
+  function escHtml(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
 
   function metaChip(text, icon = '') {
     return `<span class="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">${icon}${text}</span>`;
   }
+
+  // ── Label chips ──────────────────────────────────────────────────────────────
+
+  async function loadLabels() {
+    try {
+      const labels = await fetch(`${BASE}/api/labels`).then(r => r.json());
+      if (!Array.isArray(labels) || labels.length === 0) return;
+      labelBarWrap.classList.remove('hidden');
+      renderLabelChips(labels);
+    } catch { /* labels are non-critical */ }
+  }
+
+  function renderLabelChips(labels) {
+    labelBar.innerHTML = labels.map(label => {
+      const active = activeLabels.has(label);
+      return `<button
+        onclick="toggleLabel(${JSON.stringify(escHtml(label))})"
+        data-label="${escHtml(label)}"
+        class="label-chip shrink-0 text-xs font-medium px-3 py-1 rounded-full border transition-colors whitespace-nowrap
+          ${active
+            ? 'bg-amber-400 text-white border-amber-400'
+            : 'bg-white text-stone-600 border-stone-200 hover:border-amber-300 hover:text-amber-700'}"
+      >${escHtml(label)}</button>`;
+    }).join('');
+  }
+
+  function toggleLabel(label) {
+    if (activeLabels.has(label)) {
+      activeLabels.delete(label);
+    } else {
+      activeLabels.add(label);
+    }
+    // Re-render chips with updated state
+    const allChips = labelBar.querySelectorAll('[data-label]');
+    allChips.forEach(btn => {
+      const l = btn.getAttribute('data-label');
+      const active = activeLabels.has(l);
+      btn.className = `label-chip shrink-0 text-xs font-medium px-3 py-1 rounded-full border transition-colors whitespace-nowrap ${
+        active
+          ? 'bg-amber-400 text-white border-amber-400'
+          : 'bg-white text-stone-600 border-stone-200 hover:border-amber-300 hover:text-amber-700'
+      }`;
+    });
+    loadRecipes(document.getElementById('search').value.trim());
+  }
+
+  // ── Recipe cards ─────────────────────────────────────────────────────────────
 
   function renderCards(recipes) {
     loadingEl.classList.add('hidden');
@@ -93,11 +159,22 @@
       if (r.prepTime) chips.push(metaChip('Prep ' + r.prepTime, '⏱ '));
       if (r.cookTime) chips.push(metaChip('Cook ' + r.cookTime, '🔥 '));
 
+      const labels = Array.isArray(r.labels) ? r.labels : [];
+      const visibleLabels = labels.slice(0, 3);
+      const extraCount = labels.length - visibleLabels.length;
+      const labelPills = visibleLabels.map(l =>
+        `<span class="inline-flex text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">${escHtml(l)}</span>`
+      ).join('');
+      const extraPill = extraCount > 0
+        ? `<span class="inline-flex text-xs bg-stone-100 text-stone-400 px-2 py-0.5 rounded-full">+${extraCount}</span>`
+        : '';
+
       return `
         <a href="${BASE}/recipes/${r.id}" class="card bg-white rounded-xl border border-stone-100 shadow-sm overflow-hidden flex flex-col no-underline">
           <div class="p-5 flex flex-col flex-1">
             <h2 dir="auto" class="font-semibold text-stone-800 text-base leading-snug mb-1">${escHtml(r.title)}</h2>
-            ${r.description ? `<p dir="auto" class="text-sm text-stone-500 line-clamp-2 mb-3">${escHtml(r.description)}</p>` : '<div class="mb-3"></div>'}
+            ${r.description ? `<p dir="auto" class="text-sm text-stone-500 line-clamp-2 mb-2">${escHtml(r.description)}</p>` : '<div class="mb-2"></div>'}
+            ${labels.length > 0 ? `<div class="flex flex-wrap gap-1 mb-3">${labelPills}${extraPill}</div>` : '<div class="mb-3"></div>'}
             <div class="flex flex-wrap gap-1.5 mb-4 min-h-[1.5rem]">${chips.join('')}</div>
             <div class="mt-auto flex items-center justify-between">
               <span class="text-xs text-stone-400">${r.ingredients.length} ingredients</span>
@@ -108,6 +185,8 @@
     }).join('');
   }
 
+  // ── Fetch ────────────────────────────────────────────────────────────────────
+
   let debounceTimer;
   document.getElementById('search').addEventListener('input', e => {
     clearTimeout(debounceTimer);
@@ -115,12 +194,17 @@
   });
 
   async function loadRecipes(query = '') {
-    const url = query ? `${BASE}/api/recipes?q=${encodeURIComponent(query)}` : `${BASE}/api/recipes`;
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    if (activeLabels.size > 0) params.set('labels', [...activeLabels].join(','));
+    const url = `${BASE}/api/recipes${params.size ? '?' + params.toString() : ''}`;
+
     try {
       const recipes = await fetch(url).then(r => r.json());
-      if (query && recipes.length === 0) {
-        emptyTitle.textContent = `No results for "${query}"`;
-        emptySub.textContent = 'Try a different search term.';
+      const hasFilter = query || activeLabels.size > 0;
+      if (hasFilter && recipes.length === 0) {
+        emptyTitle.textContent = 'No matching recipes';
+        emptySub.textContent = 'Try different search terms or labels.';
       } else {
         emptyTitle.textContent = 'No recipes yet';
         emptySub.textContent = 'Send an Instagram recipe link to your Telegram bot to get started.';
@@ -133,11 +217,7 @@
     }
   }
 
-  function escHtml(str) {
-    return String(str ?? '')
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
+  loadLabels();
   loadRecipes();
 </script>
 </body>

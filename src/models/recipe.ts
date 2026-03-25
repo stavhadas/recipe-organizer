@@ -30,6 +30,7 @@ export const RecipeSchema = z.object({
   cookTime: z.string().nullish(),
   ingredients: z.array(IngredientSchema).min(1),
   steps: z.array(RecipeStepSchema).min(1),
+  labels: z.array(z.string()).nullish(),
   sourceUrl: z.string().url(),
   extractedAt: z.string().datetime(),
   _raw: z.string().nullish(),

@@ -14,6 +14,14 @@ Rules:
 - Clean up hashtags (#...), mentions (@...), and promotional text.
 - Steps must be numbered sequentially starting from 1.
 - For each step, include an "ingredients" array listing the ingredients added or used in that step. Each entry has "name" (exact name from the ingredients list above) and, if determinable, "amount" and "unit" for the quantity used specifically in that step — which may differ from the total amount in the ingredients list. Use your language understanding to infer what's being added at each step. Omit the field entirely if no specific ingredient is added in that step.
+- Assign 2–8 labels from the taxonomy below (use exact casing). Choose only labels that clearly apply.
+  Meal type:  breakfast, lunch, dinner, brunch, snack, dessert, drink
+  Dietary:    vegan, vegetarian, gluten-free, dairy-free, healthy, keto
+  Protein:    chicken, beef, lamb, fish, seafood, tofu, eggs, turkey, pork
+  Cuisine:    asian, italian, mexican, mediterranean, middle-eastern, american, french, indian, thai, japanese
+  Occasion:   passover, holiday, shabbat, quick, easy, hard, meal-prep
+  Style:      soup, salad, baked, grilled, fried, raw, one-pot, pasta
+  You may add 1-2 custom labels if none from the taxonomy fit well.
 - If the post genuinely contains no food recipe at all, return exactly: {"error": "No recipe found", "reason": "<brief explanation>"}.
 - Do NOT include any text outside the JSON object.`;
 
@@ -44,7 +52,8 @@ const RECIPE_JSON_SCHEMA = `{
         }
       ]
     }
-  ]
+  ],
+  "labels": ["string — 2-8 labels from the taxonomy"]
 }`;
 
 export class GeminiError extends Error {
@@ -143,4 +152,62 @@ ${rawJson}`;
   }
 
   return repairResult.data;
+}
+
+const LABEL_TAXONOMY = `Meal type: breakfast, lunch, dinner, brunch, snack, dessert, drink
+Dietary: vegan, vegetarian, gluten-free, dairy-free, healthy, keto
+Protein: chicken, beef, lamb, fish, seafood, tofu, eggs, turkey, pork
+Cuisine: asian, italian, mexican, mediterranean, middle-eastern, american, french, indian, thai, japanese
+Occasion: passover, holiday, shabbat, quick, easy, hard, meal-prep
+Style: soup, salad, baked, grilled, fried, raw, one-pot, pasta`;
+
+/**
+ * Lightweight Gemini call that returns ONLY labels for an existing recipe.
+ * Used to backfill old recipes that were saved before auto-labeling was added.
+ */
+export async function getLabelsForRecipe(
+  title: string,
+  rawCaption: string,
+  ingredientNames: string[],
+): Promise<string[]> {
+  const KNOWN_LABELS = ['breakfast','lunch','dinner','brunch','snack','dessert','drink',
+    'vegan','vegetarian','gluten-free','dairy-free','healthy','keto',
+    'chicken','beef','lamb','fish','seafood','tofu','eggs','turkey','pork',
+    'asian','italian','mexican','mediterranean','middle-eastern','american',
+    'french','indian','thai','japanese','passover','holiday','shabbat',
+    'quick','easy','hard','meal-prep','soup','salad','baked','grilled',
+    'fried','raw','one-pot','pasta'];
+
+  const prompt = `You are a recipe classifier. Pick 2-8 labels for this recipe from the list below.
+Reply with ONLY the chosen labels separated by commas. No other text.
+
+Available labels: ${KNOWN_LABELS.join(', ')}
+
+Recipe title: ${title}
+Ingredients: ${ingredientNames.join(', ')}
+Caption: ${rawCaption.slice(0, 1500)}`;
+
+  try {
+    const response = await genAI.models.generateContent({
+      model: config.gemini.model,
+      contents: prompt,
+      config: { temperature: 0.1, maxOutputTokens: 128 },
+    });
+    const raw = (response.text ?? '').trim();
+    console.log('[gemini] getLabelsForRecipe raw >>>' + raw + '<<<');
+
+    // Match every word/phrase in the response against our known taxonomy
+    const lower = raw.toLowerCase();
+    const labels = KNOWN_LABELS.filter((w) => {
+      // match as a whole word/phrase (surrounded by non-alphanumeric or start/end)
+      const escaped = w.replace(/[-]/g, '\\-');
+      return new RegExp(`(^|[^a-z])${escaped}([^a-z]|$)`).test(lower);
+    });
+
+    console.log('[gemini] getLabelsForRecipe parsed:', labels);
+    return labels;
+  } catch (err) {
+    console.error('[gemini] getLabelsForRecipe failed:', err);
+    return [];
+  }
 }
