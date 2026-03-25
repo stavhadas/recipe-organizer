@@ -36,11 +36,11 @@ async function main(): Promise<void> {
   bot.command('start', async (ctx) => {
     await ctx.replyWithHTML(
       '<b>Recipe Organizer Bot 🍳</b>\n\n' +
-        'Send me an Instagram post URL or a PDF/Word document containing recipes ' +
-        "and I'll extract them into a clean, organized format.\n\n" +
-        '<b>Instagram example:</b>\n' +
-        '<code>https://www.instagram.com/p/ABC123/</code>\n\n' +
-        '<b>Documents:</b> Send any PDF or .docx file — multiple recipes per file are supported!\n\n' +
+        "Send me a recipe and I'll extract it into a clean, organized format.\n\n" +
+        '<b>Supported inputs:</b>\n' +
+        '• Any recipe website or magazine URL\n' +
+        '• An Instagram post or reel URL\n' +
+        '• A PDF or Word (.docx) file — multiple recipes per file supported\n\n' +
         'Type /help for more info.',
     );
   });
@@ -48,18 +48,16 @@ async function main(): Promise<void> {
   bot.command('help', async (ctx) => {
     await ctx.replyWithHTML(
       '<b>How to use:</b>\n\n' +
+        '<b>Recipe website / magazine:</b>\n' +
+        '• Paste any URL from a recipe site, food blog, or magazine\n' +
+        '• e.g. allrecipes.com, bbcgoodfood.com, or any blog\n\n' +
         '<b>Instagram:</b>\n' +
-        '1. Find a recipe post on Instagram\n' +
-        '2. Copy the post URL\n' +
-        '3. Paste it here\n\n' +
-        '<b>Supported Instagram URLs:</b>\n' +
-        '• instagram.com/p/...\n' +
-        '• instagram.com/reel/...\n\n' +
+        '• instagram.com/p/... or instagram.com/reel/...\n' +
+        '• Post must be public with the recipe in the caption\n\n' +
         '<b>Documents (PDF / Word):</b>\n' +
         '• Send a .pdf or .docx file directly\n' +
         '• Multiple recipes per file are supported\n' +
-        '• Brief or incomplete recipes will be expanded by AI (and marked as such)\n\n' +
-        '<b>Note:</b> Instagram posts must be public and have the recipe in the caption.',
+        '• Brief or incomplete recipes will be expanded by AI (marked as such)',
     );
   });
 

@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import { config } from '../config/index.js';
 import { GeminiRecipeOutputSchema, type GeminiRecipeOutput } from '../models/recipe.js';
+import type { WebPageContent } from './webFetcher.js';
 
 const genAI = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
@@ -255,7 +256,7 @@ If no food recipes are found, return: {"error": "No recipes found", "reason": ".
           systemInstruction: DOCUMENT_SYSTEM_INSTRUCTION,
           responseMimeType: 'application/json',
           temperature: 0.1,
-          maxOutputTokens: 16384,
+          maxOutputTokens: 65536,
         },
       });
     } else {
@@ -267,7 +268,7 @@ If no food recipes are found, return: {"error": "No recipes found", "reason": ".
           systemInstruction: DOCUMENT_SYSTEM_INSTRUCTION,
           responseMimeType: 'application/json',
           temperature: 0.1,
-          maxOutputTokens: 16384,
+          maxOutputTokens: 65536,
         },
       });
     }
@@ -291,13 +292,42 @@ If no food recipes are found, return: {"error": "No recipes found", "reason": ".
     throw new GeminiError('No recipes found in document', 'NO_RECIPE', reason);
   }
 
+  // Resilient per-recipe validation: collect valid recipes, skip invalid ones.
+  // This handles documents like class notes where some entries are too brief to
+  // form a valid recipe even after AI completion.
+  const tryExtractValidRecipes = (candidate: unknown): GeminiRecipeOutput[] | null => {
+    if (typeof candidate !== 'object' || candidate === null) return null;
+    const rawList = (candidate as Record<string, unknown>).recipes;
+    if (!Array.isArray(rawList)) return null;
+
+    const valid: GeminiRecipeOutput[] = [];
+    let skipped = 0;
+    for (const r of rawList) {
+      const res = GeminiRecipeOutputSchema.safeParse(r);
+      if (res.success) {
+        valid.push(res.data);
+      } else {
+        skipped++;
+        console.log('[gemini] Skipping invalid recipe item:', JSON.stringify(res.error.issues));
+      }
+    }
+    if (valid.length > 0) {
+      if (skipped > 0) {
+        console.log(`[gemini] Partial success: ${valid.length} valid, ${skipped} skipped`);
+      }
+      return valid;
+    }
+    return null; // all failed
+  };
+
+  const firstPass = tryExtractValidRecipes(parsed);
+  if (firstPass) return firstPass;
+
+  // All recipes failed validation — log and attempt repair
   const result = GeminiDocumentOutputSchema.safeParse(parsed);
-  if (result.success) return result.data.recipes;
+  console.log('[gemini] document Zod validation errors:', JSON.stringify(result.error?.issues, null, 2));
 
-  console.log('[gemini] document Zod validation errors:', JSON.stringify(result.error.issues, null, 2));
-
-  // One repair attempt
-  const errors = result.error.issues
+  const errors = (result.error?.issues ?? [])
     .map((e) => `- ${String(e.path.join('.'))}: ${e.message}`)
     .join('\n');
 
@@ -316,7 +346,7 @@ ${rawJson}`;
         systemInstruction: DOCUMENT_SYSTEM_INSTRUCTION,
         responseMimeType: 'application/json',
         temperature: 0.1,
-        maxOutputTokens: 16384,
+        maxOutputTokens: 65536,
       },
     });
     repairedJson = repairResponse.text ?? '';
@@ -331,15 +361,172 @@ ${rawJson}`;
     throw new GeminiError('Gemini repair response was not valid JSON', 'INVALID_RESPONSE');
   }
 
-  const repairResult = GeminiDocumentOutputSchema.safeParse(repaired);
+  // Try resilient validation on repaired response too
+  const repairPass = tryExtractValidRecipes(repaired);
+  if (repairPass) return repairPass;
+
+  throw new GeminiError(
+    'Document recipe extraction produced invalid structure after repair attempt',
+    'INVALID_RESPONSE',
+  );
+}
+
+const WEB_SYSTEM_INSTRUCTION = `You are a recipe extraction assistant. Your job is to read web page content and produce a clean, well-structured recipe.
+
+Rules:
+- The page may contain ads, navigation menus, comments, related articles, and other non-recipe content. Ignore all of that — focus only on the recipe.
+- The content may be in any language (Hebrew, Arabic, Spanish, etc.). Extract and return the recipe in the same language as the source.
+- Use your judgment to identify and organize ingredients and steps even if the content is loosely written or mixes instructions with storytelling.
+- Infer reasonable structure: if ingredients are listed inline within a sentence, split them out. If steps are described narratively, convert them to clear numbered instructions.
+- Omit amounts and units only when truly absent — do not guess specific measurements, but do include vague ones like "a handful", "to taste", "a drizzle".
+- Steps must be numbered sequentially starting from 1.
+- For each step, include an "ingredients" array listing the ingredients added or used in that step. Each entry has "name" (exact name from the ingredients list above) and, if determinable, "amount" and "unit" for the quantity used specifically in that step.
+- Assign 2–8 labels from the taxonomy below (use exact casing). Choose only labels that clearly apply.
+  Meal type:  breakfast, lunch, dinner, brunch, snack, dessert, drink
+  Dietary:    vegan, vegetarian, gluten-free, dairy-free, healthy, keto
+  Protein:    chicken, beef, lamb, fish, seafood, tofu, eggs, turkey, pork
+  Cuisine:    asian, italian, mexican, mediterranean, middle-eastern, american, french, indian, thai, japanese
+  Occasion:   passover, holiday, shabbat, quick, easy, hard, meal-prep
+  Style:      soup, salad, baked, grilled, fried, raw, one-pot, pasta
+  You may add 1-2 custom labels if none from the taxonomy fit well.
+- If the page genuinely contains no food recipe at all, return exactly: {"error": "No recipe found", "reason": "<brief explanation>"}.
+- Do NOT include any text outside the JSON object.`;
+
+export async function extractRecipeFromWebContent(
+  content: WebPageContent,
+): Promise<GeminiRecipeOutput> {
+  let prompt: string;
+
+  if (content.jsonLd) {
+    prompt = `Convert this structured JSON-LD recipe data to our schema. Return ONLY valid JSON matching this schema:
+
+${RECIPE_JSON_SCHEMA}
+
+If this is not actually a recipe, return: {"error": "No recipe found", "reason": "..."}
+
+JSON-LD data:
+${JSON.stringify(content.jsonLd, null, 2)}`;
+  } else {
+    prompt = `Extract the recipe from this web page content. Return ONLY valid JSON matching this schema:
+
+${RECIPE_JSON_SCHEMA}
+
+If no recipe is present, return: {"error": "No recipe found", "reason": "..."}
+
+Page title: ${content.pageTitle}
+
+Page content:
+---
+${content.text}
+---`;
+  }
+
+  console.log(`[gemini] extractRecipeFromWebContent: jsonLd=${!!content.jsonLd}, textLen=${content.text?.length ?? 0}`);
+
+  const rawJson = await (async () => {
+    try {
+      const response = await genAI.models.generateContent({
+        model: config.gemini.model,
+        contents: prompt,
+        config: {
+          systemInstruction: WEB_SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+          maxOutputTokens: 4096,
+        },
+      });
+      return response.text ?? '';
+    } catch (err) {
+      console.error('[gemini] extractRecipeFromWebContent API call failed:', err);
+      throw new GeminiError(`Gemini API call failed: ${err}`, 'API_ERROR');
+    }
+  })();
+
+  console.log('[gemini] extractRecipeFromWebContent raw response length:', rawJson.length);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    throw new GeminiError('Gemini returned invalid JSON for web content', 'INVALID_RESPONSE');
+  }
+
+  if (typeof parsed === 'object' && parsed !== null && 'error' in parsed) {
+    const { reason } = parsed as { error: string; reason?: string };
+    throw new GeminiError('No recipe found on page', 'NO_RECIPE', reason);
+  }
+
+  const result = GeminiRecipeOutputSchema.safeParse(parsed);
+  if (result.success) return result.data;
+
+  console.log('[gemini] web Zod validation errors:', JSON.stringify(result.error.issues, null, 2));
+
+  // One repair attempt
+  const errors = result.error.issues
+    .map((e) => `- ${String(e.path.join('.'))}: ${e.message}`)
+    .join('\n');
+
+  const repairPrompt = `The JSON you returned has these validation errors:
+${errors}
+
+Return the corrected JSON only, keeping the same schema. Your previous response:
+${rawJson}`;
+
+  const repairedJson = await callGemini(repairPrompt);
+
+  let repaired: unknown;
+  try {
+    repaired = JSON.parse(repairedJson);
+  } catch {
+    throw new GeminiError('Gemini repair response was not valid JSON', 'INVALID_RESPONSE');
+  }
+
+  const repairResult = GeminiRecipeOutputSchema.safeParse(repaired);
   if (!repairResult.success) {
     throw new GeminiError(
-      'Document recipe extraction produced invalid structure after repair attempt',
+      'Web recipe extraction produced invalid structure after repair attempt',
       'INVALID_RESPONSE',
     );
   }
 
-  return repairResult.data.recipes;
+  return repairResult.data;
+}
+
+/**
+ * Ask Gemini to generate a helpful, user-friendly explanation of why an
+ * extraction failed. The reply language matches the source language hint.
+ * Non-fatal: returns empty string on any failure.
+ */
+export async function generateErrorExplanation(context: {
+  /** Human-readable description of what was sent, e.g. "a PDF cooking class document in Hebrew" */
+  source: string;
+  /** Technical description of the error */
+  error: string;
+  /** Optional extra context about what was detected */
+  hint?: string;
+}): Promise<string> {
+  const prompt = `A user submitted ${context.source} to a recipe extraction bot, but the extraction failed.
+Technical reason: ${context.error}
+${context.hint ? `Additional context: ${context.hint}` : ''}
+
+Write a helpful, specific, and warm explanation for the user (2–4 sentences) that:
+1. Explains what likely went wrong in plain language (no technical jargon or internal system details)
+2. Suggests what the user could try next (e.g. try a different format, simplify the document, send individual recipes)
+3. If relevant, mentions anything positive that was detected (e.g. "I could see the document contained cooking tips, but...")
+
+If the source document seems to be in Hebrew, reply in Hebrew. Otherwise reply in English.`;
+
+  try {
+    const response = await genAI.models.generateContent({
+      model: config.gemini.model,
+      contents: prompt,
+      config: { temperature: 0.4, maxOutputTokens: 512 },
+    });
+    return (response.text ?? '').trim();
+  } catch (err) {
+    console.error('[gemini] generateErrorExplanation failed:', err);
+    return '';
+  }
 }
 
 const LABEL_TAXONOMY = `Meal type: breakfast, lunch, dinner, brunch, snack, dessert, drink

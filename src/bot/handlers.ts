@@ -3,7 +3,8 @@ import type { Context } from 'telegraf';
 import axios from 'axios';
 import { isInstagramUrl, normalizeInstagramUrl, extractTextUrls } from '../utils/urlParser.js';
 import { fetchInstagramPost, InstagramError } from '../services/instagram.js';
-import { extractRecipe, extractRecipesFromDocument, GeminiError } from '../services/gemini.js';
+import { extractRecipe, extractRecipesFromDocument, extractRecipeFromWebContent, generateErrorExplanation, GeminiError } from '../services/gemini.js';
+import { fetchWebPageContent, WebFetchError } from '../services/webFetcher.js';
 import { formatRecipeAsHtml, splitHtmlMessage } from '../services/formatter.js';
 import { RecipeSchema } from '../models/recipe.js';
 import { saveRecipe } from '../db/database.js';
@@ -14,7 +15,7 @@ const SUPPORTED_MIME_TYPES: Record<string, 'pdf' | 'docx'> = {
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
 };
 
-function resolveUserMessage(err: unknown): string {
+async function resolveUserMessage(err: unknown, source?: string): Promise<string> {
   if (err instanceof InstagramError) {
     switch (err.code) {
       case 'PRIVATE_POST':
@@ -30,12 +31,34 @@ function resolveUserMessage(err: unknown): string {
     }
   }
 
+  if (err instanceof WebFetchError) {
+    switch (err.code) {
+      case 'FETCH_FAILED':
+        return '⚠️ Could not reach that page. Check the URL and try again.';
+      case 'UNSUPPORTED_CONTENT':
+        return '❌ That URL doesn\'t point to a readable web page. Please send a recipe page URL.';
+      case 'TOO_LARGE':
+        return '❌ That page is too large to process.';
+    }
+  }
+
   if (err instanceof GeminiError) {
     if (err.code === 'NO_RECIPE') {
       const reason = err.reason ? `\n\n${err.reason}` : '';
-      return `🍽️ This post doesn't appear to contain a recipe.${reason}`;
+      return `🍽️ No recipe was found.${reason}`;
     }
-    return '⚠️ Failed to extract the recipe from this post. The caption may be in an unusual format.';
+
+    // For extraction failures, ask AI to give a meaningful explanation
+    const aiExplanation = await generateErrorExplanation({
+      source: source ?? 'a recipe source',
+      error: err.message,
+      hint: err.code === 'INVALID_RESPONSE'
+        ? 'The content structure was unusual and could not be parsed into a valid recipe format after multiple attempts.'
+        : undefined,
+    });
+
+    const fallback = '⚠️ Failed to extract the recipe. The content may be in an unusual format.';
+    return aiExplanation ? `⚠️ ${aiExplanation}` : fallback;
   }
 
   console.error('[handler] Unexpected error:', err);
@@ -141,13 +164,26 @@ export async function handleDocumentMessage(ctx: Context): Promise<void> {
     if (err instanceof GeminiError) {
       if (err.code === 'NO_RECIPE') {
         const reason = err.reason ? `\n\n${err.reason}` : '';
-        await editLoading(`🍽️ No recipes were found in this document.${reason}`);
+        await editLoading(`🍽️ לא נמצאו מתכונים במסמך זה.${reason}`);
       } else {
-        await editLoading('⚠️ Failed to extract recipes from this document. Please try again.');
+        const aiExplanation = await generateErrorExplanation({
+          source: `a ${fileType === 'pdf' ? 'PDF' : 'Word'} document named "${filename}"`,
+          error: err.message,
+          hint: err.code === 'INVALID_RESPONSE'
+            ? 'The document may be structured as class notes or a course guide rather than a recipe collection, which makes it harder to extract standardised recipe data.'
+            : undefined,
+        });
+        const base = '⚠️ Failed to extract recipes from this document.';
+        await editLoading(aiExplanation ? `${base}\n\n${aiExplanation}` : base);
       }
     } else {
       console.error('[handler] Document processing error:', err);
-      await editLoading('⚠️ An unexpected error occurred while processing the document.');
+      const aiExplanation = await generateErrorExplanation({
+        source: `a ${fileType === 'pdf' ? 'PDF' : 'Word'} document named "${filename}"`,
+        error: String(err),
+      });
+      const base = '⚠️ An unexpected error occurred while processing the document.';
+      await editLoading(aiExplanation ? `${base}\n\n${aiExplanation}` : base);
     }
   }
 }
@@ -156,44 +192,38 @@ export async function handleTextMessage(ctx: Context): Promise<void> {
   if (!ctx.message || !('text' in ctx.message)) return;
 
   const text = ctx.message.text;
-  const urls = extractTextUrls(text).filter(isInstagramUrl);
+  const allUrls = extractTextUrls(text);
+  const igUrl = allUrls.find(isInstagramUrl);
+  const webUrl = !igUrl ? allUrls[0] : undefined;
 
-  if (urls.length === 0) {
-    // Only respond if the user seems to be trying to send a URL
+  if (!igUrl && !webUrl) {
+    // Silently ignore non-URL messages; give a hint if it looks like a failed URL
     if (text.startsWith('http')) {
-      await ctx.reply(
-        'Please send an Instagram post or reel URL.\n' +
-          'Example: https://www.instagram.com/p/ABC123/',
-      );
+      await ctx.reply('Please send a recipe page URL or an Instagram post URL.');
     }
     return;
   }
 
-  const url = normalizeInstagramUrl(urls[0]!);
+  if (igUrl) {
+    await handleInstagramUrl(ctx, normalizeInstagramUrl(igUrl));
+  } else {
+    await handleWebUrl(ctx, webUrl!);
+  }
+}
 
-  // Send immediate loading message
+async function handleInstagramUrl(ctx: Context, url: string): Promise<void> {
   const loadingMsg = await ctx.replyWithHTML(
     `⏳ Fetching recipe...\n<code>${url}</code>`,
     { link_preview_options: { is_disabled: true } },
   );
 
-  const editLoading = async (text: string) => {
-    await ctx.telegram.editMessageText(
-      ctx.chat!.id,
-      loadingMsg.message_id,
-      undefined,
-      text,
-    );
+  const editLoading = async (msg: string) => {
+    await ctx.telegram.editMessageText(ctx.chat!.id, loadingMsg.message_id, undefined, msg);
   };
 
   try {
-    // Step 1: Fetch Instagram post
     const post = await fetchInstagramPost(url);
-
-    // Step 2: Extract recipe via Gemini
     const extracted = await extractRecipe(post.caption);
-
-    // Step 3: Build full Recipe with metadata
     const recipe = RecipeSchema.parse({
       ...extracted,
       sourceUrl: url,
@@ -201,14 +231,12 @@ export async function handleTextMessage(ctx: Context): Promise<void> {
       _raw: post.caption,
     });
 
-    // Step 3b: Persist to database (non-fatal)
     try {
       saveRecipe(recipe);
     } catch (dbErr) {
       console.error('[handler] DB save failed:', dbErr);
     }
 
-    // Step 4: Format and reply
     const html = formatRecipeAsHtml(recipe);
     const chunks = splitHtmlMessage(html, 4096);
 
@@ -221,13 +249,60 @@ export async function handleTextMessage(ctx: Context): Promise<void> {
         { parse_mode: 'HTML', link_preview_options: { is_disabled: true } },
       );
     } else {
-      // Too long — delete loading message and send multiple parts
       await ctx.telegram.deleteMessage(ctx.chat!.id, loadingMsg.message_id);
       for (const chunk of chunks) {
         await ctx.replyWithHTML(chunk, { link_preview_options: { is_disabled: true } });
       }
     }
   } catch (err) {
-    await editLoading(resolveUserMessage(err));
+    await editLoading(await resolveUserMessage(err, `an Instagram post at ${url}`));
+  }
+}
+
+async function handleWebUrl(ctx: Context, url: string): Promise<void> {
+  const loadingMsg = await ctx.replyWithHTML(
+    `⏳ Fetching recipe...\n<code>${url}</code>`,
+    { link_preview_options: { is_disabled: true } },
+  );
+
+  const editLoading = async (msg: string) => {
+    await ctx.telegram.editMessageText(ctx.chat!.id, loadingMsg.message_id, undefined, msg);
+  };
+
+  try {
+    const content = await fetchWebPageContent(url);
+    const extracted = await extractRecipeFromWebContent(content);
+    const recipe = RecipeSchema.parse({
+      ...extracted,
+      sourceUrl: url,
+      extractedAt: new Date().toISOString(),
+      _raw: content.text ?? JSON.stringify(content.jsonLd),
+    });
+
+    try {
+      saveRecipe(recipe);
+    } catch (dbErr) {
+      console.error('[handler] DB save failed:', dbErr);
+    }
+
+    const html = formatRecipeAsHtml(recipe);
+    const chunks = splitHtmlMessage(html, 4096);
+
+    if (chunks.length === 1) {
+      await ctx.telegram.editMessageText(
+        ctx.chat!.id,
+        loadingMsg.message_id,
+        undefined,
+        chunks[0]!,
+        { parse_mode: 'HTML', link_preview_options: { is_disabled: true } },
+      );
+    } else {
+      await ctx.telegram.deleteMessage(ctx.chat!.id, loadingMsg.message_id);
+      for (const chunk of chunks) {
+        await ctx.replyWithHTML(chunk, { link_preview_options: { is_disabled: true } });
+      }
+    }
+  } catch (err) {
+    await editLoading(await resolveUserMessage(err, `a recipe page at ${url}`));
   }
 }
