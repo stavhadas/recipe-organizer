@@ -29,11 +29,18 @@ try {
   // Column already exists — ignore
 }
 
+// Migrate existing DBs that don't have the ai_completed column yet
+try {
+  db.exec(`ALTER TABLE recipes ADD COLUMN ai_completed INTEGER DEFAULT 0`);
+} catch {
+  // Column already exists — ignore
+}
+
 const stmtInsert = db.prepare(`
   INSERT OR REPLACE INTO recipes
-    (title, description, servings, prep_time, cook_time, ingredients, steps, labels, source_url, extracted_at, raw_caption)
+    (title, description, servings, prep_time, cook_time, ingredients, steps, labels, ai_completed, source_url, extracted_at, raw_caption)
   VALUES
-    (@title, @description, @servings, @prep_time, @cook_time, @ingredients, @steps, @labels, @source_url, @extracted_at, @raw_caption)
+    (@title, @description, @servings, @prep_time, @cook_time, @ingredients, @steps, @labels, @ai_completed, @source_url, @extracted_at, @raw_caption)
 `);
 
 const stmtAll = db.prepare(`SELECT * FROM recipes ORDER BY extracted_at DESC`);
@@ -49,6 +56,7 @@ interface RecipeRow {
   ingredients: string;
   steps: string;
   labels: string | null;
+  ai_completed: number;
   source_url: string;
   extracted_at: string;
   raw_caption: string | null;
@@ -64,6 +72,7 @@ function rowToRecipe(row: RecipeRow): Recipe & { id: number } {
     ingredients: JSON.parse(row.ingredients) as unknown[],
     steps: JSON.parse(row.steps) as unknown[],
     labels: row.labels ? (JSON.parse(row.labels) as string[]) : [],
+    aiCompleted: row.ai_completed === 1,
     sourceUrl: row.source_url,
     extractedAt: row.extracted_at,
     _raw: row.raw_caption ?? undefined,
@@ -81,6 +90,7 @@ export function saveRecipe(recipe: Recipe): void {
     ingredients: JSON.stringify(recipe.ingredients),
     steps: JSON.stringify(recipe.steps),
     labels: JSON.stringify(recipe.labels ?? []),
+    ai_completed: recipe.aiCompleted ? 1 : 0,
     source_url: recipe.sourceUrl,
     extracted_at: recipe.extractedAt,
     raw_caption: recipe._raw ?? null,

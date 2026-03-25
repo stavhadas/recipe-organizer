@@ -31,7 +31,8 @@ export const RecipeSchema = z.object({
   ingredients: z.array(IngredientSchema).min(1),
   steps: z.array(RecipeStepSchema).min(1),
   labels: z.array(z.string()).nullish(),
-  sourceUrl: z.string().url(),
+  aiCompleted: z.boolean().nullish(),
+  sourceUrl: z.string().min(1),
   extractedAt: z.string().datetime(),
   _raw: z.string().nullish(),
 });
@@ -41,6 +42,9 @@ export const GeminiRecipeOutputSchema = RecipeSchema.omit({
   sourceUrl: true,
   extractedAt: true,
   _raw: true,
+  aiCompleted: true,
+}).extend({
+  aiCompleted: z.boolean().nullish(),
 });
 
 export type Ingredient = z.infer<typeof IngredientSchema>;

@@ -21,6 +21,11 @@ function formatStep(step: Recipe['steps'][number]): string {
 export function formatRecipeAsHtml(recipe: Recipe): string {
   const lines: string[] = [];
 
+  if (recipe.aiCompleted) {
+    lines.push(`<i>⚠️ This recipe was brief or incomplete in the original document. It has been expanded by AI and may differ from the original.</i>`);
+    lines.push('');
+  }
+
   lines.push(`<b>${esc(recipe.title)}</b>`);
 
   if (recipe.description) {
@@ -48,8 +53,10 @@ export function formatRecipeAsHtml(recipe: Recipe): string {
     lines.push(formatStep(step));
   }
 
-  lines.push('');
-  lines.push(`<a href="${esc(recipe.sourceUrl)}">View original post ↗</a>`);
+  if (!recipe.sourceUrl.startsWith('doc://')) {
+    lines.push('');
+    lines.push(`<a href="${esc(recipe.sourceUrl)}">View original post ↗</a>`);
+  }
 
   return lines.join('\n');
 }

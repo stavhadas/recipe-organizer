@@ -2,7 +2,7 @@ import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { config } from '../config/index.js';
 import { verifyYtDlp } from '../services/instagram.js';
-import { handleTextMessage } from './handlers.js';
+import { handleTextMessage, handleDocumentMessage } from './handlers.js';
 import { startWebServer } from '../web/server.js';
 import { backfillStepIngredients, backfillLabels } from '../services/migration.js';
 
@@ -36,10 +36,11 @@ async function main(): Promise<void> {
   bot.command('start', async (ctx) => {
     await ctx.replyWithHTML(
       '<b>Recipe Organizer Bot 🍳</b>\n\n' +
-        'Send me an Instagram post or reel URL that contains a recipe ' +
-        "and I'll extract it into a clean, organized format.\n\n" +
-        '<b>Example:</b>\n' +
+        'Send me an Instagram post URL or a PDF/Word document containing recipes ' +
+        "and I'll extract them into a clean, organized format.\n\n" +
+        '<b>Instagram example:</b>\n' +
         '<code>https://www.instagram.com/p/ABC123/</code>\n\n' +
+        '<b>Documents:</b> Send any PDF or .docx file — multiple recipes per file are supported!\n\n' +
         'Type /help for more info.',
     );
   });
@@ -47,18 +48,23 @@ async function main(): Promise<void> {
   bot.command('help', async (ctx) => {
     await ctx.replyWithHTML(
       '<b>How to use:</b>\n\n' +
+        '<b>Instagram:</b>\n' +
         '1. Find a recipe post on Instagram\n' +
         '2. Copy the post URL\n' +
         '3. Paste it here\n\n' +
-        '<b>Supported URLs:</b>\n' +
+        '<b>Supported Instagram URLs:</b>\n' +
         '• instagram.com/p/...\n' +
         '• instagram.com/reel/...\n\n' +
-        '<b>Note:</b> The post must be public and have the recipe written in the caption text.\n\n' +
-        'Reels without text captions are not supported yet (coming in a future update).',
+        '<b>Documents (PDF / Word):</b>\n' +
+        '• Send a .pdf or .docx file directly\n' +
+        '• Multiple recipes per file are supported\n' +
+        '• Brief or incomplete recipes will be expanded by AI (and marked as such)\n\n' +
+        '<b>Note:</b> Instagram posts must be public and have the recipe in the caption.',
     );
   });
 
   bot.on(message('text'), handleTextMessage);
+  bot.on(message('document'), handleDocumentMessage);
 
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
