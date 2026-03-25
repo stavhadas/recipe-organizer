@@ -23,7 +23,11 @@ async function main(): Promise<void> {
     console.error('[migration] backfillLabels failed:', err),
   );
 
-  const bot = new Telegraf(config.telegram.botToken);
+  // Document extraction (large PDFs + AI completion) can take several minutes.
+  // Increase the handler timeout well beyond Telegraf's default 90 seconds.
+  const bot = new Telegraf(config.telegram.botToken, {
+    handlerTimeout: 10 * 60 * 1000, // 10 minutes
+  });
 
   // Log incoming messages
   bot.use(async (ctx, next) => {

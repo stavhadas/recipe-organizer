@@ -84,9 +84,15 @@ export async function handleDocumentMessage(ctx: Context): Promise<void> {
 
   const editLoading = async (text: string) => {
     try {
-      await ctx.telegram.editMessageText(ctx.chat!.id, loadingMsg.message_id, undefined, text);
+      await ctx.telegram.editMessageText(
+        ctx.chat!.id,
+        loadingMsg.message_id,
+        undefined,
+        text,
+        { parse_mode: 'HTML' },
+      );
     } catch {
-      // ignore edit failures
+      // ignore edit failures (e.g. message already deleted)
     }
   };
 
